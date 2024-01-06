@@ -6,7 +6,7 @@
  *
  * Copyright (c) 2009, The University of Melbourne, Australia
  */
-package org.cloudsimplus.examples.network;
+package org.cloudbus.cloudsim.examples.network;
 
 import org.cloudsimplus.brokers.DatacenterBroker;
 import org.cloudsimplus.brokers.DatacenterBrokerSimple;

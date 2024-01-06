@@ -23,7 +23,9 @@
  */
 package org.cloudsimplus.examples;
 
+import org.cloudsimplus.allocationpolicies.VmAllocationPolicy;
 import org.cloudsimplus.allocationpolicies.VmAllocationPolicyRoundRobin;
+import org.cloudsimplus.allocationpolicies.VmAllocationPolicySimple;
 import org.cloudsimplus.brokers.DatacenterBroker;
 import org.cloudsimplus.brokers.DatacenterBrokerSimple;
 import org.cloudsimplus.builders.tables.CloudletsTableBuilder;
@@ -32,17 +34,23 @@ import org.cloudsimplus.cloudlets.CloudletSimple;
 import org.cloudsimplus.core.CloudSimPlus;
 import org.cloudsimplus.datacenters.Datacenter;
 import org.cloudsimplus.datacenters.DatacenterSimple;
+import org.cloudsimplus.examples.custom.CustomHost;
+import org.cloudsimplus.examples.custom.CustomVmAllocationPolicy;
 import org.cloudsimplus.hosts.Host;
 import org.cloudsimplus.hosts.HostSimple;
+import org.cloudsimplus.power.models.PowerModelHostSimple;
 import org.cloudsimplus.resources.Pe;
 import org.cloudsimplus.resources.PeSimple;
 import org.cloudsimplus.utilizationmodels.UtilizationModelDynamic;
+import org.cloudsimplus.vms.HostResourceStats;
 import org.cloudsimplus.vms.Vm;
 import org.cloudsimplus.vms.VmSimple;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.Random;
 
 /**
  * An example that show the usage of the {@link VmAllocationPolicyRoundRobin},
@@ -61,12 +69,21 @@ public class VmAllocationPolicyRoundRobinExample {
     private static final int HOSTS = 4;
     private static final int HOST_PES = 8;
 
-    private static final int VMS = 8;
+    private static final int VMS = 16;
     private static final int VM_PES = 2;
 
-    private static final int CLOUDLETS = 8;
+    private static final int CLOUDLETS = 16;
     private static final int CLOUDLET_PES = 2;
     private static final int CLOUDLET_LENGTH = 10000;
+    /**
+     * Defines the power a Host uses, even if it's idle (in Watts).
+     */ 
+    private static final double STATIC_POWER = 15;
+
+    /**
+     * The max power a Host uses (in Watts).
+     */
+    private static final int MAX_POWER = 50;
 
     private final CloudSimPlus simulation;
     private final DatacenterBroker broker0;
@@ -95,10 +112,24 @@ public class VmAllocationPolicyRoundRobinExample {
         broker0.submitCloudletList(cloudletList);
 
         simulation.start();
-
-        final var cloudletFinishedList = broker0.getCloudletFinishedList();
-        cloudletFinishedList.sort(Comparator.comparingLong(cloudlet -> cloudlet.getVm().getId()));
-        new CloudletsTableBuilder(cloudletFinishedList).build();
+        // System.err.println(datacenter0.getHostList().size());
+        // System.err.println();
+        // for (Host host : datacenter0.getHostList()) {
+        //     final HostResourceStats cpuStats = host.getCpuUtilizationStats();
+            
+        //     final double utilizationPercentMean = cpuStats.getMean();
+            
+        //     final double watts = host.getPowerModel().getPower(utilizationPercentMean);
+        //     System.err.println(watts);
+        //     // System.err.println(host.getBw());
+        //     // System.err.println(host.getRam());
+        // } 
+        // for (Cloudlet cloudletSubmittedList : broker0.getCloudletSubmittedList()) {
+        //     cloudletSubmittedList.getFinishedLengthSoFar()
+        // }
+        // final var cloudletFinishedList = broker0.getCloudletFinishedList();
+        // cloudletFinishedList.sort(Comparator.comparingLong(cloudlet -> cloudlet.getVm().getId()));
+        // new CloudletsTableBuilder(cloudletFinishedList).build();
     }
 
     /**
@@ -111,8 +142,18 @@ public class VmAllocationPolicyRoundRobinExample {
             hostList.add(host);
         }
 
-        return new DatacenterSimple(simulation, hostList, new VmAllocationPolicyRoundRobin());
+        return new DatacenterSimple(simulation, hostList, new CustomVmAllocationPolicy(hostList));
     }
+    // private Optional<Host> batAlgoBased(VmAllocationPolicy allocationPolicy, Vm vm) {
+    //     for (Host host : allocationPolicy.getHostList()) {
+    //         System.err.println(host.getPowerModel().getPower());
+    //     }
+    //     return allocationPolicy
+    //         .getHostList()
+    //         .stream()
+    //         .filter(host -> host.isSuitableForVm(vm))
+    //         .min(Comparator.comparingInt(Host::getFreePesNumber));
+    // }
 
     private Host createHost() {
         final var peList = new ArrayList<Pe>(HOST_PES);
@@ -122,15 +163,17 @@ public class VmAllocationPolicyRoundRobinExample {
             peList.add(new PeSimple(1000));
         }
 
-        final long ram = 2048; //in Megabytes
-        final long bw = 10000; //in Megabits/s
-        final long storage = 1000000; //in Megabytes
-
+        final long ram = (long)(2048 ); //in Megabytes
+        final long bw = (long)(10000); //in Megabits/s
+        final long storage = (long)(1000000); //in Megabytes
         /*
         Uses ResourceProvisionerSimple by default for RAM and BW provisioning
         and VmSchedulerSpaceShared for VM scheduling.
         */
-        return new HostSimple(ram, bw, storage, peList, false);
+        final var host = new HostSimple(ram, bw, storage, peList);
+        host.setPowerModel(new PowerModelHostSimple(MAX_POWER, STATIC_POWER));
+        host.enableUtilizationStats();
+        return host;
     }
 
     /**
@@ -138,10 +181,11 @@ public class VmAllocationPolicyRoundRobinExample {
      */
     private List<Vm> createVms() {
         final var list = new ArrayList<Vm>(VMS);
+        Random random = new Random();
         for (int i = 0; i < VMS; i++) {
             //Uses a CloudletSchedulerTimeShared by default to schedule Cloudlets
-            final Vm vm = new VmSimple(1000, VM_PES);
-            vm.setRam(512).setBw(1000).setSize(10000);
+            final Vm vm = new VmSimple(1000* random.nextDouble(), VM_PES);
+            vm.setRam((long)(512* random.nextDouble())).setBw((long)(1000* random.nextDouble())).setSize((long)(10000* random.nextDouble()));
             list.add(vm);
         }
 
@@ -155,14 +199,18 @@ public class VmAllocationPolicyRoundRobinExample {
         final var list = new ArrayList<Cloudlet>(CLOUDLETS);
 
         //UtilizationModel defining the Cloudlets use only 50% of any resource all the time
-        final var utilizationModel = new UtilizationModelDynamic(0.5);
-
+        
         for (int i = 0; i < CLOUDLETS; i++) {
+            final var utilizationModel = new UtilizationModelDynamic((new Random()).nextDouble());
+            // System.err.println(utilizationModel.getUtilization());
             final var cloudlet = new CloudletSimple(CLOUDLET_LENGTH, CLOUDLET_PES, utilizationModel);
             cloudlet.setSizes(1024);
             list.add(cloudlet);
         }
 
         return list;
+    }
+    private void createNewCloudletasds(){
+
     }
 }
